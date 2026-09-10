@@ -277,8 +277,15 @@ def load_existing_news() -> list[dict]:
         return []
 
     try:
-        with NEWS_FILE.open("r", encoding="utf-8") as file:
-            data = json.load(file)
+        raw_text = NEWS_FILE.read_text(encoding="utf-8").strip()
+
+        if not raw_text:
+            logging.warning(
+                "news.json empty hai, empty list se start kar rahe hain"
+            )
+            return []
+
+        data = json.loads(raw_text)
 
         if not isinstance(data, list):
             raise ValueError("news.json list format me nahi hai")
@@ -288,6 +295,13 @@ def load_existing_news() -> list[dict]:
             for item in data
             if isinstance(item, dict)
         ]
+
+    except json.JSONDecodeError as exc:
+        logging.error(
+            "news.json corrupt/invalid JSON hai: %s. Empty list se aage badh rahe hain.",
+            exc,
+        )
+        return []
 
     except Exception as exc:
         logging.error(
