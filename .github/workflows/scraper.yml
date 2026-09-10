@@ -37,7 +37,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Build CA bundle with missing GlobalSign intermediate
+        run: |
+          CERTIFI_PATH=$(python3 -c "import certifi; print(certifi.where())")
+          curl -sSL -o globalsign-intermediate.crt https://secure.globalsign.com/cacert/gsrsaovsslca2018.crt
+
+          # Agar DER format me aaya to PEM me convert karo
+          if ! grep -q "BEGIN CERTIFICATE" globalsign-intermediate.crt; then
+            openssl x509 -inform DER -in globalsign-intermediate.crt -out globalsign-intermediate.pem -outform PEM
+          else
+            mv globalsign-intermediate.crt globalsign-intermediate.pem
+          fi
+
+          cat "$CERTIFI_PATH" globalsign-intermediate.pem > combined-ca-bundle.pem
+          echo "COMBINED_CA_BUNDLE=$(pwd)/combined-ca-bundle.pem" >> "$GITHUB_ENV"
+
       - name: Run scraper
+        env:
+          REQUESTS_CA_BUNDLE: ${{ env.COMBINED_CA_BUNDLE }}
         run: |
           python scraper.py
 
