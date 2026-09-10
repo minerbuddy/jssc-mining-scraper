@@ -1,0 +1,77 @@
+name: JSSC Mining Scraper
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    # 03:30 UTC = 09:00 AM IST
+    - cron: "30 3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jssc-mining-scraper
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run scraper
+        run: |
+          python scraper.py
+
+      - name: Check only allowed changes
+        run: |
+          echo "Changed files:"
+          git status --short
+
+          ALLOWED_PATTERN='^(news.json|pdf/|logs/)'
+
+          git status --short \
+            | awk '{print substr($0,4)}' \
+            | while read file; do
+                if [[ -n "$file" && ! "$file" =~ $ALLOWED_PATTERN ]]; then
+                  echo "Unexpected file changed: $file"
+                  exit 1
+                fi
+              done
+
+      - name: Add only generated files
+        run: |
+          git add news.json
+          git add pdf/
+          git add logs/
+
+      - name: Commit only when new files/data exist
+        run: |
+          if git diff --cached --quiet; then
+            echo "Nothing new. Commit nahi banega."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "chore: add new JSSC mining notices"
+          git push
