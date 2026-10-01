@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ LOG_DIR = Path("logs")
 LOG_FILE = LOG_DIR / "scraper.log"
 
 MAX_PAGES = 20
+MAX_CONSECUTIVE_PAGE_FAILURES = 2
 REQUEST_DELAY_SECONDS = 1.0
 DOWNLOAD_PDFS = True
 
@@ -74,9 +76,9 @@ logging.basicConfig(
 session = requests.Session()
 
 retry_strategy = Retry(
-    total=5,
-    connect=5,
-    read=5,
+    total=3,
+    connect=3,
+    read=3,
     backoff_factor=1.5,
     status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["GET", "HEAD"],
@@ -95,7 +97,7 @@ session.headers.update(HEADERS)
 # ---------------------------------------------------------
 
 def clean_text(value: str) -> str:
-    return re.sub(r"s+", " ", value or "").strip()
+    return re.sub(r"\s+", " ", value or "").strip()
 
 
 def normalize_url(url: str) -> str:
@@ -135,7 +137,7 @@ def get_keywords(text: str) -> list[str]:
 
 
 def request_get(url: str) -> requests.Response:
-    response = session.get(url, timeout=45)
+    response = session.get(url, timeout=(10, 30))
     response.raise_for_status()
 
     time.sleep(REQUEST_DELAY_SECONDS)
@@ -146,9 +148,9 @@ def parse_date(text: str) -> str | None:
     text = clean_text(text)
 
     patterns = [
-        r"\bd{1,2}[/-]d{1,2}[/-]d{2,4}\b",
-        r"\bd{1,2}s+[A-Za-z]{3,9}s+d{4}\b",
-        r"\b[A-Za-z]{3,9}s+d{1,2},s+d{4}\b",
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",
+        r"\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b",
+        r"\b[A-Za-z]{3,9}\s+\d{1,2},\s+\d{4}\b",
     ]
 
     for pattern in patterns:
@@ -587,16 +589,29 @@ def main():
     old_records = load_existing_news()
     discovered_records = []
     seen_urls = set()
+    failed_pages = 0
+    pages_ok = 0
 
     for page_number in range(MAX_PAGES):
         try:
             links = get_whats_new_page(page_number)
+            failed_pages = 0
+            pages_ok += 1
 
         except requests.RequestException as exc:
+            failed_pages += 1
             logging.error(
                 "What's New page failed: %s",
                 exc,
             )
+
+            if failed_pages >= MAX_CONSECUTIVE_PAGE_FAILURES:
+                logging.error(
+                    "Lagatar %d pages fail, site unreachable lagti hai. Rok rahe hain.",
+                    failed_pages,
+                )
+                break
+
             continue
 
         if not links:
@@ -678,6 +693,10 @@ def main():
                     url,
                     exc,
                 )
+
+    if pages_ok == 0:
+        logging.error("Ek bhi page load nahi hua. Exit code 1.")
+        sys.exit(1)
 
     final_records, added_count = merge_without_delete(
         old_records,
